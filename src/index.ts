@@ -197,6 +197,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.deferUpdate().catch(() => {});
 
         const userId = id.replace(prefix, "");
+        const adminMention = interaction.user.toString();
 
         const actions: Record<string, { label: string; status: string; color: number; remove: boolean; emoji: string }> = {
             "review_": { label: "взята на рассмотрение", status: "🔍 На рассмотрении", color: 0x3498DB, remove: false, emoji: "🔍" },
@@ -214,7 +215,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const dm = new EmbedBuilder()
                 .setColor(action.color)
                 .setTitle(`📢 Заявка ${action.label}`)
-                .setDescription(getDmText(action.label))
+                .setDescription(getDmText(action.label, adminMention))
                 .setTimestamp()
                 .setFooter({ text: "Администрация клана" });
             await user.send({ embeds: [dm] });
@@ -225,7 +226,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const newEmbed = EmbedBuilder.from(interaction.message.embeds[0])
             .setColor(action.color)
-            .setFooter({ text: `Статус: ${action.status}` });
+            .setFooter({ text: `Статус: ${action.status} администратором ${interaction.user.tag}` });
 
         await interaction.editReply({
             embeds: [newEmbed],
@@ -242,7 +243,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         `**Пользователь:** <@${userId}>\n` +
                         `**Discord:** ${userTag}\n` +
                         `**ID:** \`${userId}\`\n\n` +
-                        `Решение принято администратором.`
+                        `**Администратор:** ${adminMention}\n` +
+                        `Решение принято администратором ${adminMention}.`
                     )
                     .setTimestamp();
 
@@ -251,17 +253,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
             }
         }
 
-        console.log(`✅ Заявка ${userId} ${action.label}`);
+        console.log(`✅ Заявка ${userId} ${action.label} администратором ${interaction.user.tag}`);
         return;
     }
 });
 
-function getDmText(action: string): string {
+function getDmText(action: string, adminMention: string): string {
     const texts: Record<string, string> = {
-        "взята на рассмотрение": "Ваша заявка была взята на рассмотрение нашей командой.\n\nМы внимательно изучим вашу анкету и примем решение в ближайшее время.\n\nОжидайте дальнейших уведомлений!",
-        "одобрена": "🎉 **Поздравляем!**\n\nВаша заявка на вступление в клан была одобрена!\n\nДобро пожаловать! 🎉\n\nВ ближайшее время с вами свяжется администрация для дальнейших инструкций.",
-        "отклонена": "❌ К сожалению, ваша заявка на вступление в клан была отклонена.\n\nЭто может быть связано с:\n• Несоответствием требованиям клана\n• Закрытым набором\n• Другими причинами\n\nНе расстраивайтесь! Вы можете попробовать подать заявку снова в будущем.",
-        "на обзвоне": "📞 **Приглашение на собеседование!**\n\nВас приглашают на голосовое собеседование!\n\n• С вами свяжется администратор для уточнения времени\n• Обзвон проходит в голосовом канале Discord\n• Подготовьтесь рассказать о себе и своём опыте\n\nПожалуйста, будьте на связи и проверяйте личные сообщения!\n\nУдачи! 🍀",
+        "взята на рассмотрение": 
+            `Ваша заявка была взята на рассмотрение администратором ${adminMention}.\n\n` +
+            "Мы внимательно изучим вашу анкету и примем решение в ближайшее время.\n\n" +
+            "Ожидайте дальнейших уведомлений!",
+        "одобрена": 
+            "🎉 **Поздравляем!**\n\n" +
+            `Ваша заявка на вступление в клан была одобрена администратором ${adminMention}!\n\n` +
+            "Добро пожаловать! 🎉\n\n" +
+            "В ближайшее время с вами свяжется администрация для дальнейших инструкций.",
+        "отклонена": 
+            `❌ К сожалению, ваша заявка на вступление в клан была отклонена администратором ${adminMention}.\n\n` +
+            "Это может быть связано с:\n" +
+            "• Несоответствием требованиям клана\n" +
+            "• Закрытым набором\n" +
+            "• Другими причинами\n\n" +
+            "Не расстраивайтесь! Вы можете попробовать подать заявку снова в будущем.",
+        "на обзвоне": 
+            "📞 **Приглашение на собеседование!**\n\n" +
+            "Вас приглашают на голосовое собеседование!\n\n" +
+            `• С вами свяжется администратор ${adminMention} для уточнения времени\n` +
+            "• Обзвон проходит в голосовом канале Discord\n" +
+            "• Подготовьтесь рассказать о себе и своём опыте\n\n" +
+            "Пожалуйста, будьте на связи и проверяйте личные сообщения!\n\n" +
+            "Удачи! 🍀",
     };
     return texts[action] || "Статус вашей заявки изменился.";
 }
