@@ -9,7 +9,7 @@ import {
     ModalBuilder,
     TextChannel,
     TextInputBuilder,
-    TextInputStyle
+    TextInputStyle,
 } from "discord.js";
 import "dotenv/config";
 import http from "http";
@@ -22,9 +22,7 @@ const REVIEW_CHANNEL_ID: string = process.env.REVIEW_CHANNEL_ID || "150529136830
 const RESULTS_CHANNEL_ID: string = process.env.RESULTS_CHANNEL_ID || "1505287736850907296";
 const PORT: number = parseInt(process.env.PORT || "10000");
 
-const BANNER_URL = "https://i.imgur.com/ТВОЯ_КАРТИНКА.png";
-
-const recentApplications = new Set<string>();
+const recentApplications = new Map<string, number>();
 
 if (!TOKEN) {
     console.error("❌ ОШИБКА: Токен не найден!");
@@ -39,6 +37,15 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
     ],
 });
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [userId, timestamp] of recentApplications) {
+        if (now - timestamp > 5 * 60 * 1000) {
+            recentApplications.delete(userId);
+        }
+    }
+}, 5 * 60 * 1000);
 
 client.once(Events.ClientReady, async (c) => {
     console.log(`✅ Бот ${c.user.tag} запущен!`);
@@ -66,21 +73,22 @@ async function sendApplicationMessage(client: Client) {
         return;
     }
 
+    const botAvatar = client.user?.displayAvatarURL({ size: 256 }) || "";
+
     const embed = new EmbedBuilder()
         .setColor(0x5865F2)
-        .setImage(BANNER_URL)
         .setTitle("👋 Путь в клан начинается здесь!")
         .setDescription(
-            "## Добро пожаловать в нашу семью!\n\n" +
-            "Мы рады, что ты решил присоединиться к нам.\n\n" +
-            "### 📋 Процесс:\n" +
-            "• Обзвон — в ЛС\n" +
-            "• Отказ — в <#" + RESULTS_CHANNEL_ID + ">\n" +
-            "• Сроки: 1-3 дня\n\n" +
-            "### ⚠️ Важно:\n" +
-            "• Заявки только при открытом наборе"
+            "Уведомление о приглашении на обзвон обычно отправляется в личные сообщения. " +
+            "Если ЛС закрыты, оно отправляется в канал — <#" + RESULTS_CHANNEL_ID + ">. " +
+            "В этот канал также приходят уведомления об отказе в наборе.\n\n" +
+            "Обычно заявки обрабатываются в течение **1-3 дней** — всё зависит от того, " +
+            "насколько загружены наши люди на данный момент.\n\n" +
+            "Подать заявку можно только при **открытом наборе**. " +
+            "Если не выходит — набор закрыт. Внимательно прочтите сообщение ниже."
         )
-        .setFooter({ text: "Желаем удачи! 🍀" })
+        .setThumbnail(botAvatar)
+        .setFooter({ text: "Желаем удачи! 🍀", iconURL: botAvatar })
         .setTimestamp();
 
     const button = new ButtonBuilder()
@@ -117,13 +125,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "application_modal") {
-        // Защита от дублирования
-        if (recentApplications.has(interaction.user.id)) {
-            await interaction.reply({ content: "⚠️ Вы уже подали заявку! Ожидайте рассмотрения.", flags: 64 }).catch(() => {});
+        const lastApplication = recentApplications.get(interaction.user.id);
+        if (lastApplication && Date.now() - lastApplication < 5 * 60 * 1000) {
+            await interaction.reply({ 
+                content: "⚠️ **Вы уже подали заявку!**\n\nПожалуйста, ожидайте рассмотрения. Повторная отправка возможна через 5 минут.", 
+                flags: 64 
+            }).catch(() => {});
             return;
         }
 
         await interaction.deferReply({ flags: 64 }).catch(() => {});
+
+        recentApplications.set(interaction.user.id, Date.now());
 
         const data = {
             nickname: interaction.fields.getTextInputValue("nickname"),
@@ -132,9 +145,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
             about: interaction.fields.getTextInputValue("about"),
             contact: interaction.fields.getTextInputValue("discord_contact") || "Не указан",
         };
-
-        recentApplications.add(interaction.user.id);
-        setTimeout(() => recentApplications.delete(interaction.user.id), 5 * 60 * 1000);
 
         console.log(`📝 Заявка от ${interaction.user.tag}`);
 
@@ -165,10 +175,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (reviewChannel?.isTextBased()) {
             await (reviewChannel as TextChannel).send({ embeds: [embed], components: [buttons] });
             console.log("✅ Заявка отправлена в канал рассмотрения");
+        } else {
+            console.log("❌ Канал рассмотрения не найден");
         }
 
         await interaction.editReply({
-            content: "✅ **Заявка отправлена!**\n\nОжидайте 1-3 дня. Уведомление придёт в ЛС или в <#" + RESULTS_CHANNEL_ID + ">."
+            content: "✅ **Заявка успешно отправлена!**\n\n" +
+                "Ожидайте рассмотрения в течение 1-3 дней.\n" +
+                "Уведомление о результате придёт в ЛС или в <#" + RESULTS_CHANNEL_ID + ">.\n\n" +
+                "Желаем удачи! 🍀"
         }).catch(() => {});
         return;
     }
@@ -192,6 +207,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const action = actions[prefix];
         let userTag = "Неизвестный пользователь";
+
         try {
             const user = await client.users.fetch(userId);
             userTag = user.tag;
@@ -199,11 +215,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .setColor(action.color)
                 .setTitle(`📢 Заявка ${action.label}`)
                 .setDescription(getDmText(action.label))
-                .setTimestamp();
+                .setTimestamp()
+                .setFooter({ text: "Администрация клана" });
             await user.send({ embeds: [dm] });
             console.log(`✅ Уведомление отправлено ${user.tag}`);
         } catch {
-            console.log("⚠️ ЛС закрыты");
+            console.log(`⚠️ Не удалось отправить ЛС пользователю ${userId}`);
         }
 
         const newEmbed = EmbedBuilder.from(interaction.message.embeds[0])
@@ -215,19 +232,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
             components: action.remove ? [] : interaction.message.components,
         }).catch(() => {});
 
-        // Отправляем уведомление в канал Итоги заявок (для одобренных и отклонённых)
         if (prefix === "approve_" || prefix === "reject_") {
             const resultsChannel = await client.channels.fetch(RESULTS_CHANNEL_ID).catch(() => null);
             if (resultsChannel?.isTextBased()) {
                 const resultEmbed = new EmbedBuilder()
                     .setColor(action.color)
                     .setTitle(`${action.emoji} Заявка ${action.label}!`)
-                    .setDescription(`Пользователь: <@${userId}>\nDiscord: ${userTag}`)
-                    .setTimestamp()
-                    .setFooter({ text: `Решение принято администратором` });
+                    .setDescription(
+                        `**Пользователь:** <@${userId}>\n` +
+                        `**Discord:** ${userTag}\n` +
+                        `**ID:** \`${userId}\`\n\n` +
+                        `Решение принято администратором.`
+                    )
+                    .setTimestamp();
 
-                await (resultsChannel as TextChannel).send({ embeds: [resultEmbed] }).catch(() => {});
-                console.log(`📢 Уведомление об ${action.label} отправлено в канал итогов`);
+                await (resultsChannel as TextChannel).send({ embeds: [resultEmbed] });
+                console.log(`📢 Результат отправлен в канал итогов`);
             }
         }
 
@@ -238,12 +258,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 function getDmText(action: string): string {
     const texts: Record<string, string> = {
-        "взята на рассмотрение": "Ваша заявка взята на рассмотрение.\n\nОжидайте решения в ближайшее время!",
-        "одобрена": "🎉 Поздравляем! Заявка одобрена!\n\nДобро пожаловать в клан! Скоро с вами свяжутся.",
-        "отклонена": "❌ К сожалению, заявка отклонена.\n\nПопробуйте подать заявку позже.",
-        "на обзвоне": "📞 Вас приглашают на собеседование!\n\nАдминистратор свяжется для уточнения времени.",
+        "взята на рассмотрение": "Ваша заявка была взята на рассмотрение нашей командой.\n\nМы внимательно изучим вашу анкету и примем решение в ближайшее время.\n\nОжидайте дальнейших уведомлений!",
+        "одобрена": "🎉 **Поздравляем!**\n\nВаша заявка на вступление в клан была одобрена!\n\nДобро пожаловать в нашу дружную семью! 🎉\n\nВ ближайшее время с вами свяжется администрация для дальнейших инструкций.",
+        "отклонена": "❌ К сожалению, ваша заявка на вступление в клан была отклонена.\n\nЭто может быть связано с:\n• Несоответствием требованиям клана\n• Закрытым набором\n• Другими причинами\n\nНе расстраивайтесь! Вы можете попробовать подать заявку снова в будущем.",
+        "на обзвоне": "📞 **Приглашение на собеседование!**\n\nВас приглашают на голосовое собеседование!\n\n• С вами свяжется администратор для уточнения времени\n• Обзвон проходит в голосовом канале Discord\n• Подготовьтесь рассказать о себе и своём опыте\n\nПожалуйста, будьте на связи и проверяйте личные сообщения!\n\nУдачи! 🍀",
     };
-    return texts[action] || "Статус заявки изменён.";
+    return texts[action] || "Статус вашей заявки изменился.";
 }
 
 client.on(Events.GuildMemberAdd, async (member) => {
@@ -263,8 +283,9 @@ client.on(Events.GuildMemberAdd, async (member) => {
             .setTitle("👋 Добро пожаловать!")
             .setDescription(`${member.user}, добро пожаловать на сервер!`)
             .setThumbnail(member.user.displayAvatarURL({ size: 128 }))
-            .addFields({ name: "📝 Заявка в клан:", value: `<#${APPLICATIONS_CHANNEL_ID}>` })
-            .setTimestamp();
+            .addFields({ name: "📝 Чтобы подать заявку в клан:", value: `Перейдите в канал <#${APPLICATIONS_CHANNEL_ID}>` })
+            .setTimestamp()
+            .setFooter({ text: "Мы рады видеть тебя!" });
 
         await (channel as TextChannel).send({ embeds: [embed] }).catch(() => {});
     }
