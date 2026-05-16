@@ -53,7 +53,7 @@ client.on(Events.GuildMemberAdd, async (member: GuildMember) => {
         return;
     }
 
-    const welcomeMessage = `Добро пожаловать, ${member.user}!`;
+    const welcomeMessage = `Приветствую тебя мой маленький герой, ${member.user}!`;
     let targetChannel: TextChannel | null = null;
 
     try {
