@@ -19,10 +19,12 @@ const GUEST_ROLE_NAME: string = process.env.GUEST_ROLE_NAME || "Guest";
 const WELCOME_CHANNEL_ID: string = process.env.WELCOME_CHANNEL_ID || "";
 const APPLICATIONS_CHANNEL_ID: string = process.env.APPLICATIONS_CHANNEL_ID || "1505286263807148252";
 const REVIEW_CHANNEL_ID: string = process.env.REVIEW_CHANNEL_ID || "1505291368308932628";
-const RESULTS_CHANNEL_ID: string = process.env.RESULTS_CHANNEL_ID || "";
+const RESULTS_CHANNEL_ID: string = process.env.RESULTS_CHANNEL_ID || "1505287736850907296";
 const PORT: number = parseInt(process.env.PORT || "10000");
 
 const BANNER_URL = "https://i.imgur.com/ТВОЯ_КАРТИНКА.png";
+
+const recentApplications = new Set<string>();
 
 if (!TOKEN) {
     console.error("❌ ОШИБКА: Токен не найден!");
@@ -66,7 +68,7 @@ async function sendApplicationMessage(client: Client) {
 
     const embed = new EmbedBuilder()
         .setColor(0x5865F2)
-        .setImage(BANNER_URL) // БАННЕР ВВЕРХУ
+        .setImage(BANNER_URL)
         .setTitle("👋 Путь в клан начинается здесь!")
         .setDescription(
             "## Добро пожаловать в нашу семью!\n\n" +
@@ -95,7 +97,6 @@ async function sendApplicationMessage(client: Client) {
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {
-    // КНОПКА ПОДАТЬ ЗАЯВКУ
     if (interaction.isButton() && interaction.customId === "open_application") {
         const modal = new ModalBuilder()
             .setCustomId("application_modal")
@@ -116,6 +117,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "application_modal") {
+        // Защита от дублирования
+        if (recentApplications.has(interaction.user.id)) {
+            await interaction.reply({ content: "⚠️ Вы уже подали заявку! Ожидайте рассмотрения.", flags: 64 }).catch(() => {});
+            return;
+        }
+
         await interaction.deferReply({ flags: 64 }).catch(() => {});
 
         const data = {
@@ -125,6 +132,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             about: interaction.fields.getTextInputValue("about"),
             contact: interaction.fields.getTextInputValue("discord_contact") || "Не указан",
         };
+
+        recentApplications.add(interaction.user.id);
+        setTimeout(() => recentApplications.delete(interaction.user.id), 5 * 60 * 1000);
 
         console.log(`📝 Заявка от ${interaction.user.tag}`);
 
@@ -173,16 +183,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const userId = id.replace(prefix, "");
 
-        const actions: Record<string, { label: string; status: string; color: number; remove: boolean }> = {
-            "review_": { label: "взята на рассмотрение", status: "🔍 На рассмотрении", color: 0x3498DB, remove: false },
-            "approve_": { label: "одобрена", status: "✅ Одобрено", color: 0x2ECC71, remove: true },
-            "reject_": { label: "отклонена", status: "❌ Отклонено", color: 0xE74C3C, remove: true },
-            "call_": { label: "на обзвоне", status: "📞 Обзвон", color: 0x9B59B6, remove: false },
+        const actions: Record<string, { label: string; status: string; color: number; remove: boolean; emoji: string }> = {
+            "review_": { label: "взята на рассмотрение", status: "🔍 На рассмотрении", color: 0x3498DB, remove: false, emoji: "🔍" },
+            "approve_": { label: "одобрена", status: "✅ Одобрено", color: 0x2ECC71, remove: true, emoji: "✅" },
+            "reject_": { label: "отклонена", status: "❌ Отклонено", color: 0xE74C3C, remove: true, emoji: "❌" },
+            "call_": { label: "на обзвоне", status: "📞 Обзвон", color: 0x9B59B6, remove: false, emoji: "📞" },
         };
 
         const action = actions[prefix];
+        let userTag = "Неизвестный пользователь";
         try {
             const user = await client.users.fetch(userId);
+            userTag = user.tag;
             const dm = new EmbedBuilder()
                 .setColor(action.color)
                 .setTitle(`📢 Заявка ${action.label}`)
@@ -203,6 +215,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
             components: action.remove ? [] : interaction.message.components,
         }).catch(() => {});
 
+        // Отправляем уведомление в канал Итоги заявок (для одобренных и отклонённых)
+        if (prefix === "approve_" || prefix === "reject_") {
+            const resultsChannel = await client.channels.fetch(RESULTS_CHANNEL_ID).catch(() => null);
+            if (resultsChannel?.isTextBased()) {
+                const resultEmbed = new EmbedBuilder()
+                    .setColor(action.color)
+                    .setTitle(`${action.emoji} Заявка ${action.label}!`)
+                    .setDescription(`Пользователь: <@${userId}>\nDiscord: ${userTag}`)
+                    .setTimestamp()
+                    .setFooter({ text: `Решение принято администратором` });
+
+                await (resultsChannel as TextChannel).send({ embeds: [resultEmbed] }).catch(() => {});
+                console.log(`📢 Уведомление об ${action.label} отправлено в канал итогов`);
+            }
+        }
+
         console.log(`✅ Заявка ${userId} ${action.label}`);
         return;
     }
@@ -217,7 +245,6 @@ function getDmText(action: string): string {
     };
     return texts[action] || "Статус заявки изменён.";
 }
-
 
 client.on(Events.GuildMemberAdd, async (member) => {
     const role = member.guild.roles.cache.find(r => r.name === GUEST_ROLE_NAME);
