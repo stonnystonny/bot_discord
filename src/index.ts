@@ -7,13 +7,15 @@ import {
     TextChannel,
 } from "discord.js";
 import "dotenv/config";
+import http from "http";
 
 const TOKEN: string = process.env.DISCORD_TOKEN || "";
 const GUEST_ROLE_NAME: string = process.env.GUEST_ROLE_NAME || "Guest";
 const WELCOME_CHANNEL_ID: string = process.env.WELCOME_CHANNEL_ID || "";
+const PORT: number = parseInt(process.env.PORT || "3000");
 
 if (!TOKEN) {
-    console.error("❌ ОШИБКА: Токен не найден! Проверь файл .env и переменную DISCORD_TOKEN");
+    console.error("❌ ОШИБКА: Токен не найден!");
     process.exit(1);
 }
 
@@ -49,7 +51,7 @@ client.on(Events.GuildMemberAdd, async (member: GuildMember) => {
         return;
     }
 
-    const welcomeMessage = `Здравствуй, мой маленький герой ${member.user}!`;
+    const welcomeMessage = `Добро пожаловать, ${member.user}!`;
     let targetChannel: TextChannel | null = null;
 
     try {
@@ -71,6 +73,15 @@ client.on(Events.GuildMemberAdd, async (member: GuildMember) => {
     } catch (error) {
         console.error("❌ Ошибка при отправке:", error);
     }
+});
+
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Bot is alive!");
+});
+
+server.listen(PORT, () => {
+    console.log(`🌐 HTTP сервер запущен на порту ${PORT}`);
 });
 
 console.log("Запускаю бота...");
